@@ -24,7 +24,7 @@ def main():
     if '@' not in email or not name:
         raise SystemExit('A valid email and display name are required.')
     with session_factory().begin() as session:
-        bootstrap(session, sample=False)
+        bootstrap(session, mode=cfg['mode'], sample=False)
         user = session.scalar(select(User).where(User.email == email))
         if not user:
             user = User(email=email, name=name, role='Admin', active=True)
