@@ -4,6 +4,7 @@ import io
 from datetime import datetime, timezone
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
+from decimal import Decimal
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy import select
@@ -27,7 +28,7 @@ def p(value, style=TEXT):
 
 
 def format_money(value):
-    return f'{value // 100:,}.{abs(value) % 100:02d}' if value >= 0 else '-' + format_money(-value)
+    return f'{Decimal(str(value)) / 100:,.2f}'
 
 
 def build(session, title, number, metadata, columns, rows, widths, totals, notes=''):
