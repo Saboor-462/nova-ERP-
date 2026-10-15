@@ -326,6 +326,72 @@ def invoice_rows(frame):
     return rows
 
 
+def invoice_settlements(factory, actor, invoice_id):
+    from nova.models import InvoicePayment
+    from nova.services import records
+
+    with st.expander('Settlement history / cancellation'):
+        with factory() as session:
+            payments = session.execute(select(InvoicePayment, Voucher)
+                                       .join(Voucher, InvoicePayment.voucher_id == Voucher.id)
+                                       .where(InvoicePayment.invoice_id == invoice_id)
+                                       .order_by(Voucher.date.desc(), Voucher.number)).all()
+            payment_ids = [v.id for _, v in payments]
+            reversals = session.scalars(select(Voucher).where(Voucher.reversal_of.in_(payment_ids),
+                                                             Voucher.status != 'Rejected')).all() if payment_ids else []
+        if not payments:
+            st.info('No settlements have been recorded for this invoice.')
+            return
+        reversed_by = {v.reversal_of: v for v in reversals}
+
+        def status(voucher):
+            reversal = reversed_by.get(voucher.id)
+            if reversal:
+                return 'Reversed' if reversal.status == 'Posted' else 'Reversal awaiting approval'
+            return 'Rejected / Cancelled' if voucher.status == 'Rejected' else voucher.status
+
+        table(pd.DataFrame([{'Settlement voucher': v.number, 'Date': str(v.date), 'Amount (PKR)': rupees(p.amount),
+                             'Status': status(v), 'Reversal voucher': reversed_by[v.id].number if v.id in reversed_by else ''}
+                            for p, v in payments]), 'Invoice Settlements', key='invoice_settlements:' + invoice_id)
+        if not can(actor, 'entry'):
+            return
+        selected = choose('Settlement to cancel / reverse',
+                          {v.id: f'{v.number} · PKR {rupees(p.amount):,.2f} · {status(v)}' for p, v in payments},
+                          key='invoice_settlement_open:' + invoice_id)
+        payment, voucher = next((p, v) for p, v in payments if v.id == selected)
+        reversal = reversed_by.get(voucher.id)
+        if reversal:
+            st.info(f'Reversal {reversal.number}: {reversal.status}. Approve pending reversals from Vouchers to update the invoice balance.'
+                    if reversal.status == 'Pending' else f'Settlement reversed by approved voucher {reversal.number}.')
+        elif voucher.status == 'Pending':
+            if voucher.created_by != actor.id and actor.role != 'Admin':
+                st.info('Only the creator or an administrator can cancel this pending settlement.')
+                return
+            with st.form('cancel_invoice_settlement:' + voucher.id):
+                reason = st.text_input('Settlement cancellation reason')
+                confirmed = st.checkbox('Cancel this pending settlement and retain its history.')
+                if st.form_submit_button('Cancel pending settlement'):
+                    if not confirmed:
+                        st.warning('Confirm cancellation before continuing.')
+                    elif mutate(factory, lambda s: records.cancel_pending(s, actor.id, voucher.id, reason)):
+                        st.rerun()
+        elif voucher.status == 'Posted':
+            st.caption('The settlement remains included in approved balances until the reversal is approved in Vouchers.')
+            with st.form('reverse_invoice_settlement:' + voucher.id):
+                on = st.date_input('Settlement reversal date', business_today())
+                reason = st.text_input('Settlement reversal reason')
+                confirmed = st.checkbox('Request a reversal of this settlement and retain its history.')
+                key = 'invoice_settlement_reversal:' + voucher.id
+                request_token = token(key)
+                if st.form_submit_button('Request settlement reversal'):
+                    if not confirmed:
+                        st.warning('Confirm the reversal request before continuing.')
+                    elif mutate(factory, lambda s: accounting.reverse(s, actor.id, voucher.id, on, reason, request_token), key):
+                        st.rerun()
+        else:
+            st.info('This settlement is already rejected or cancelled and is excluded from approved balances.')
+
+
 def invoices(factory, actor):
     st.header('Purchase, sale, and dealer invoices')
     project_opts = options(factory, Project, lambda p: p.name)
@@ -355,6 +421,7 @@ def invoices(factory, actor):
             document = invoice_pdf(session, obj.id)
         st.download_button('Download / Print invoice PDF', document, f'{v.number}.pdf', 'application/pdf')
         st.caption(f'Permanent invoice ID: {obj.id} · Voucher ID: {v.id}')
+        invoice_settlements(factory, actor, obj.id)
         if can(actor, 'entry'):
             from nova.services import records as controls
             if v.status == 'Pending':
