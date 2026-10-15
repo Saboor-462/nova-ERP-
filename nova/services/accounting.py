@@ -139,6 +139,14 @@ def reverse(session, actor_id, voucher_id, on, reason, token):
     for model in (Booking, Invoice, BookingEvent):
         if session.scalar(select(model.id).where(model.voucher_id == original.id)):
             raise BusinessError('This voucher is linked to a booking, invoice, or ownership event; use its business workflow.')
+    from nova.models import InvoiceCorrection, InvoicePayment
+    from nova.services.invoice_corrections import ensure_no_pending_correction
+    if session.scalar(select(InvoiceCorrection.id).where(InvoiceCorrection.voucher_id == original.id).limit(1)):
+        raise BusinessError('This voucher belongs to an invoice correction. Use another invoice correction or the invoice cancellation workflow.')
+    invoice_ids = session.scalars(select(InvoicePayment.invoice_id).where(InvoicePayment.voucher_id == original.id)).all()
+    for invoice_id in sorted(set(invoice_ids)):
+        lock(session, Invoice, invoice_id)
+        ensure_no_pending_correction(session, invoice_id)
     booking_ids = session.scalars(select(Installment.booking_id).join(Allocation, Allocation.installment_id == Installment.id)
                                    .where(Allocation.voucher_id == original.id)).all()
     for booking_id in set(booking_ids):
