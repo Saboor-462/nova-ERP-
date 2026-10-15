@@ -65,6 +65,52 @@ st.markdown(
         margin-top: auto;
         padding-top: 1rem;
     }
+
+    [data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
+        padding-top: .25rem !important;
+        padding-bottom: .25rem !important;
+        min-height: 2rem !important;
+        height: auto !important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+        padding-top: 0 !important;
+    }
+
+    [data-testid="stSidebar"] .st-key-nova_sidebar_navigation,
+    [data-testid="stSidebar"] .st-key-nova_sidebar_navigation > [data-testid="stVerticalBlock"] {
+        gap: .4rem;
+    }
+
+    [data-testid="stSidebar"] .st-key-nova_sidebar_navigation [data-testid="stButton"] button {
+        width: 100% !important;
+        min-height: 44px;
+        justify-content: flex-start;
+        padding: 10px 14px;
+        background: #13283d !important;
+        color: #ffffff !important;
+        border: 1px solid #cba334 !important;
+        border-radius: 9px;
+    }
+
+    [data-testid="stSidebar"] .st-key-nova_sidebar_navigation [data-testid="stButton"] button p {
+        width: 100%;
+        margin: 0;
+        color: #ffffff !important;
+        text-align: left;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    [data-testid="stSidebar"] .st-key-nova_sidebar_navigation [data-testid="stButton"] button:hover {
+        background: #203a52 !important;
+        border-color: #e4c36f !important;
+    }
+
+    [data-testid="stSidebar"] .st-key-nova_sidebar_navigation [data-testid="stButton"] button:focus-visible {
+        outline: 2px solid #e4c36f;
+        outline-offset: 3px;
+    }
     </style>''',
     unsafe_allow_html=True,
 )
@@ -72,10 +118,45 @@ st.markdown(
 groups = ['Dashboard', 'Reports', 'Vouchers', 'Chart of Accounts', 'Clients', 'Projects', 'Units', 'Allotments',
           'Invoices', 'Transfers & Cancellations', 'CRM / Leads', 'Cash / Bank', 'Bulk Entries', 'Financial Years', 'Administration']
 
+
+def select_page(page_name):
+    st.session_state['nova_navigation_page'] = page_name
+
+
+if 'nova_navigation_page' not in st.session_state:
+    st.session_state['nova_navigation_page'] = st.session_state.get('nova_navigation', 'Dashboard')
+if st.session_state['nova_navigation_page'] not in groups:
+    st.session_state['nova_navigation_page'] = 'Dashboard'
+page = st.session_state['nova_navigation_page']
+
+st.markdown(
+    f'''<style>
+    [data-testid="stSidebar"] .st-key-nova_sidebar_navigation .st-key-nova_navigation_{groups.index(page)} button {{
+        background: #25435c !important;
+        border-color: #e4c36f !important;
+        box-shadow: inset 3px 0 0 #e4c36f;
+    }}
+
+    [data-testid="stSidebar"] .st-key-nova_sidebar_navigation .st-key-nova_navigation_{groups.index(page)} button p {{
+        font-weight: 700;
+    }}
+    </style>''',
+    unsafe_allow_html=True,
+)
+
 with st.sidebar:
     with st.container(key='nova_sidebar_layout'):
         st.image(str(LOGO), width=125)
-        page = st.radio('Navigation', groups, key='nova_navigation', width='stretch')
+        st.caption('Navigation')
+        with st.container(key='nova_sidebar_navigation'):
+            for index, label in enumerate(groups):
+                st.button(
+                    label,
+                    key=f'nova_navigation_{index}',
+                    width='stretch',
+                    on_click=select_page,
+                    args=(label,),
+                )
 
         with st.container(key='nova_sidebar_footer'):
             render_account_controls(factory, config, actor)
