@@ -210,6 +210,29 @@ class InvoiceItem(Base):
     amount: Mapped[int] = mapped_column(BigInteger)
 
 
+class InvoiceCorrection(Base):
+    __tablename__ = 'invoice_corrections'
+    __table_args__ = (
+        one_of('invoice_corrections', 'status', ('Pending', 'Approved', 'Rejected')),
+        Index('ux_invoice_corrections_pending', 'invoice_id', unique=True,
+              postgresql_where=text("status = 'Pending'"), sqlite_where=text("status = 'Pending'")),
+    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
+    invoice_id: Mapped[str] = mapped_column(ForeignKey('invoices.id'), index=True)
+    token: Mapped[str] = mapped_column(String(100), unique=True)
+    effective_on: Mapped[date] = mapped_column(Date)
+    reason: Mapped[str] = mapped_column(Text)
+    before_data: Mapped[str] = mapped_column(Text)
+    after_data: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default='Pending', index=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    reviewed_by: Mapped[str | None] = mapped_column(ForeignKey('users.id'), index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_reason: Mapped[str] = mapped_column(Text, default='')
+    voucher_id: Mapped[str | None] = mapped_column(ForeignKey('vouchers.id'), unique=True)
+
+
 class BookingEvent(Base):
     __tablename__ = 'booking_events'
     __table_args__ = (one_of('booking_events', 'kind', ('Transfer', 'Cancellation')), one_of('booking_events', 'status', ('Pending', 'Approved', 'Rejected')),
