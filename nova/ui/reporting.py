@@ -121,7 +121,65 @@ def dashboard(factory, actor):
                 amount_card(col, key, value, count=key == 'Approved Bookings')
         if view == 'Project dashboard':
             st.subheader('Inventory and booking status')
-            st.bar_chart(summary.set_index('Project')[['Available', 'Reserved / Booked']])
+            inventory = summary[['Project', 'Available', 'Reserved / Booked']].melt(
+                id_vars='Project', var_name='Status', value_name='Units',
+            )
+            maximum_units = max(1, int(inventory['Units'].max()))
+            st.vega_lite_chart(
+                inventory,
+                {
+                    'height': 320,
+                    'mark': {
+                        'type': 'bar',
+                        'cornerRadiusTopLeft': 4,
+                        'cornerRadiusTopRight': 4,
+                    },
+                    'encoding': {
+                        'x': {
+                            'field': 'Project',
+                            'type': 'nominal',
+                            'sort': None,
+                            'axis': {'title': 'Project', 'labelAngle': 0},
+                            'scale': {'paddingInner': 0.35, 'paddingOuter': 0.2},
+                        },
+                        'xOffset': {
+                            'field': 'Status',
+                            'type': 'nominal',
+                            'sort': ['Available', 'Reserved / Booked'],
+                        },
+                        'y': {
+                            'field': 'Units',
+                            'type': 'quantitative',
+                            'title': 'Number of units',
+                            'scale': {
+                                'domainMin': 0,
+                                'domainMax': maximum_units,
+                                'nice': False,
+                            },
+                            'axis': {
+                                'format': 'd',
+                                'tickMinStep': 1,
+                                'tickCount': min(maximum_units + 1, 6),
+                            },
+                        },
+                        'color': {
+                            'field': 'Status',
+                            'type': 'nominal',
+                            'scale': {
+                                'domain': ['Available', 'Reserved / Booked'],
+                                'range': ['#cba334', '#2c83c4'],
+                            },
+                            'legend': {'title': 'Unit status', 'orient': 'top'},
+                        },
+                        'tooltip': [
+                            {'field': 'Project', 'type': 'nominal'},
+                            {'field': 'Status', 'type': 'nominal'},
+                            {'field': 'Units', 'type': 'quantitative', 'format': 'd'},
+                        ],
+                    },
+                },
+                width='stretch',
+            )
         else:
             assets = int(bs.loc[bs['Type'] == 'Asset', 'Amount'].sum())
             liabilities = int(bs.loc[bs['Type'] == 'Liability', 'Amount'].sum())
