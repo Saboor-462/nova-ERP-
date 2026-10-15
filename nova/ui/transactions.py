@@ -355,6 +355,12 @@ def invoice_settlements(factory, actor, invoice_id):
                             for p, v in payments]), 'Invoice Settlements', key='invoice_settlements:' + invoice_id)
         if not can(actor, 'entry'):
             return
+        from nova.services.invoice_corrections import pending_correction
+        with factory() as session:
+            correction_pending = pending_correction(session, invoice_id) is not None
+        if correction_pending:
+            st.info('Resolve the pending invoice correction before changing or reversing settlements.')
+            return
         selected = choose('Settlement to cancel / reverse',
                           {v.id: f'{v.number} · PKR {rupees(p.amount):,.2f} · {status(v)}' for p, v in payments},
                           key='invoice_settlement_open:' + invoice_id)
@@ -392,6 +398,102 @@ def invoice_settlements(factory, actor, invoice_id):
             st.info('This settlement is already rejected or cancelled and is excluded from approved balances.')
 
 
+def invoice_correction_controls(factory, actor, invoice_id):
+    import hashlib
+    from decimal import Decimal
+    from nova.models import InvoiceCorrection, User
+    from nova.services import invoice_corrections as corrections
+
+    with factory() as session:
+        invoice = session.get(Invoice, invoice_id)
+        original = session.get(Voucher, invoice.voucher_id)
+        current = corrections.invoice_snapshot(session, invoice)
+        requests = session.scalars(select(InvoiceCorrection).where(InvoiceCorrection.invoice_id == invoice_id)
+                                   .order_by(InvoiceCorrection.created_at.desc(), InvoiceCorrection.id.desc())).all()
+        names = {u.id: u.name for u in session.scalars(select(User)).all()}
+        voucher_ids = [r.voucher_id for r in requests if r.voucher_id]
+        voucher_names = {v.id: v.number for v in session.scalars(select(Voucher).where(Voucher.id.in_(voucher_ids))).all()} if voucher_ids else {}
+        cancellation = session.scalar(select(Voucher.id).where(Voucher.reversal_of == original.id,
+                                                               Voucher.status != 'Rejected').limit(1))
+    pending_request = next((r for r in requests if r.status == 'Pending'), None)
+    if pending_request:
+        st.warning('An invoice correction is awaiting approval. The existing approved values remain in effect; settle or cancel the invoice after this request is resolved.')
+    if requests:
+        with st.expander('Invoice correction history', expanded=bool(pending_request)):
+            table(pd.DataFrame([{'Request ID': r.id, 'Effective Date': str(r.effective_on), 'Status': r.status,
+                                 'Requested By': names.get(r.created_by, r.created_by), 'Requested At (UTC)': str(r.created_at),
+                                 'Reason': r.reason, 'Reviewed By': names.get(r.reviewed_by, '') if r.reviewed_by else '',
+                                 'Reviewed At (UTC)': str(r.reviewed_at or ''), 'Review / Rejection Reason': r.review_reason,
+                                 'Adjustment Voucher': voucher_names.get(r.voucher_id, '')} for r in requests]),
+                  'Invoice Correction History', key='invoice_correction_history_table:' + invoice_id)
+            selected = choose('Correction request details',
+                              {r.id: f'{r.created_at} UTC · {r.status} · effective {r.effective_on}' for r in requests},
+                              key='invoice_correction_history:' + invoice_id + ':' + (pending_request.id if pending_request else 'history'))
+            request = next(r for r in requests if r.id == selected)
+            try:
+                before, after = json.loads(request.before_data), json.loads(request.after_data)
+                if not isinstance(before, dict) or not isinstance(after, dict):
+                    raise ValueError
+
+                def display_value(field, value):
+                    if field == 'amount':
+                        return f'{Decimal(value) / 100:,.2f}'
+                    if field == 'items':
+                        return '\n'.join(f'{n}. {item["description"]} · PKR {Decimal(item["amount"]) / 100:,.2f}'
+                                         for n, item in enumerate(value, 1)) or 'No item rows'
+                    return str(value)
+
+                changes = [{'Field': label, 'Before': display_value(field, before[field]),
+                            'Proposed / Approved': display_value(field, after[field])}
+                           for field, label in [('reference', 'Invoice reference'), ('due', 'Due date'), ('amount', 'Invoice total (PKR)'),
+                                                ('description', 'Description'), ('items', 'Item rows')]
+                           if before[field] != after[field]]
+                st.caption('Saved values for this request. Pending or rejected proposals are not included in approved invoice balances.')
+                st.dataframe(pd.DataFrame(changes, columns=['Field', 'Before', 'Proposed / Approved']), hide_index=True, width='stretch')
+            except (TypeError, ValueError, KeyError):
+                st.error('The saved correction details could not be displayed. An authorized reviewer can reject the request and ask for a new submission.')
+            if request.status == 'Pending' and can(actor, 'approve'):
+                if request.created_by == actor.id:
+                    st.info('Another authorized user must review your invoice correction.')
+                else:
+                    with st.form('review_invoice_correction:' + request.id):
+                        decision = st.selectbox('Correction decision', ['Approve', 'Reject'])
+                        reason = st.text_area('Review / rejection reason', help='A reason is required when rejecting a correction.')
+                        confirmed = st.checkbox('I have reviewed the original and proposed values.')
+                        if st.form_submit_button('Submit correction decision', type='primary'):
+                            if not confirmed:
+                                st.warning('Confirm that you reviewed the values before submitting a decision.')
+                            elif mutate(factory, lambda s: corrections.decide_correction(s, actor.id, request.id, decision == 'Approve', reason)):
+                                st.rerun()
+    if can(actor, 'entry') and invoice.status == 'Active' and original.status == 'Posted' and not pending_request:
+        if cancellation:
+            st.info('Resolve the invoice cancellation before requesting a correction.')
+        else:
+            with st.expander('Request invoice correction'):
+                st.caption(f'Original invoice date: {invoice.date}. Its posting and permanent invoice ID are retained. Resolve pending settlements or reversals before submitting a correction.')
+                signature = hashlib.sha256(json.dumps(current, sort_keys=True).encode('utf-8')).hexdigest()[:12]
+                with st.form('request_invoice_correction:' + invoice_id + ':' + signature):
+                    reference = st.text_input('Corrected invoice reference', current['reference'])
+                    on = st.date_input('Correction effective date', business_today())
+                    due = st.date_input('Corrected due date', invoice.due)
+                    amount = st.text_input('Corrected invoice total (PKR)', f'{Decimal(current["amount"]) / 100:.2f}')
+                    description = st.text_area('Corrected description', current['description'])
+                    item_frame = pd.DataFrame([{'Description': item['description'], 'Amount (PKR)': f'{Decimal(item["amount"]) / 100:.2f}'}
+                                               for item in current['items']] or [{'Description': '', 'Amount (PKR)': '0'}])
+                    st.caption('Optional item rows must total the corrected invoice amount. Remove all item rows if you want to use only the invoice description.')
+                    edited = st.data_editor(item_frame, num_rows='dynamic', hide_index=True, width='stretch',
+                                            key='invoice_correction_items:' + invoice_id + ':' + signature)
+                    reason = st.text_area('Reason for invoice correction')
+                    key = 'invoice_correction_request:' + invoice_id
+                    request_token = token(key)
+                    if st.form_submit_button('Submit correction for approval', type='primary'):
+                        if mutate(factory, lambda s: corrections.request_correction(s, actor.id, invoice_id, on, reference, due,
+                                                                                   amount, description, reason, request_token,
+                                                                                   items=invoice_rows(edited)), key):
+                            st.rerun()
+    return bool(pending_request)
+
+
 def invoices(factory, actor):
     st.header('Purchase, sale, and dealer invoices')
     project_opts = options(factory, Project, lambda p: p.name)
@@ -402,7 +504,19 @@ def invoices(factory, actor):
         # Only approved, active invoices can be settled; rejected invoices stay in history but are not offered.
         records = session.scalars(select(Invoice).join(Voucher, Invoice.voucher_id == Voucher.id)
                                   .where(Invoice.status == 'Active', Voucher.status == 'Posted').order_by(Invoice.date.desc())).all()
+        from nova.models import InvoiceCorrection
+        correction_queue = session.execute(select(InvoiceCorrection, Invoice, Party)
+                                            .join(Invoice, InvoiceCorrection.invoice_id == Invoice.id)
+                                            .join(Party, Invoice.party_id == Party.id)
+                                            .where(InvoiceCorrection.status == 'Pending')
+                                            .order_by(InvoiceCorrection.created_at)).all()
     table(frame, 'Invoice Balances', hide=['Invoice ID'])
+    if correction_queue:
+        st.subheader('Invoice corrections awaiting approval')
+        st.caption('Open the matching invoice below to review its proposed changes. Existing approved values remain in effect until approval.')
+        table(pd.DataFrame([{'Reference': i.reference, 'Party': p.name, 'Type': i.kind,
+                             'Correction Date': str(r.effective_on), 'Reason': r.reason, 'Status': r.status}
+                            for r, i, p in correction_queue]), 'Pending Invoice Corrections')
     if not pending.empty:
         st.subheader('Invoices awaiting approval')
         st.caption('Not included in the balances above until approved.')
@@ -422,6 +536,7 @@ def invoices(factory, actor):
         st.download_button('Download / Print invoice PDF', document, f'{v.number}.pdf', 'application/pdf')
         st.caption(f'Permanent invoice ID: {obj.id} · Voucher ID: {v.id}')
         invoice_settlements(factory, actor, obj.id)
+        correction_pending = invoice_correction_controls(factory, actor, obj.id)
         if can(actor, 'entry'):
             from nova.services import records as controls
             if v.status == 'Pending':
@@ -446,7 +561,7 @@ def invoices(factory, actor):
                         if st.form_submit_button('Cancel invoice'):
                             if mutate(factory, lambda s: controls.cancel_pending(s, actor.id, v.id, reason)):
                                 st.rerun()
-            elif v.status == 'Posted' and obj.status == 'Active':
+            elif v.status == 'Posted' and obj.status == 'Active' and not correction_pending:
                 with st.expander('Cancel posted invoice through reversal'):
                     with st.form('voidinvoice:' + obj.id):
                         on = st.date_input('Cancellation date', business_today())
