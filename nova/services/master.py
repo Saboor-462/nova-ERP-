@@ -132,6 +132,10 @@ def close_period(session, actor, through):
     # An approval posts on the request date, so a pending request inside the period would become impossible to approve.
     if session.scalar(select(BookingEvent.id).where(BookingEvent.date <= through, BookingEvent.status == 'Pending')):
         raise BusinessError('Resolve pending transfer and cancellation requests before closing this period.')
+    from nova.models import InvoiceCorrection
+    if session.scalar(select(InvoiceCorrection.id).where(InvoiceCorrection.effective_on <= through,
+                                                        InvoiceCorrection.status == 'Pending')):
+        raise BusinessError('Resolve pending invoice corrections before closing this period.')
     obj = session.get(Setting, 'closed_through')
     if obj and obj.value and through.isoformat() <= obj.value:
         raise BusinessError('The closing date must advance beyond the current closed period.')
