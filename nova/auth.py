@@ -5,7 +5,6 @@ from nova.models import User
 
 def render_account_controls(factory, config, actor):
     from nova.ui.common import md_escape
-    st.caption(f'{md_escape(actor.name)} · {actor.role}')
     if st.button('Sign out', key='nova_signout'):
         if config['mode'] == 'demo' or config.get('auth_method') == 'password':
             from nova.services.security import logout
@@ -14,6 +13,8 @@ def render_account_controls(factory, config, actor):
             st.rerun()
         else:
             st.logout()
+    st.caption('Version 0.2.0 · Nova ERP')
+    st.caption(md_escape(f'{actor.role}>> {actor.name}'))
 
 
 def identify(factory, config, render_sidebar=True):
