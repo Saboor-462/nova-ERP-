@@ -91,6 +91,32 @@ def save_user(session, actor, email, name, role, active=True):
     return obj
 
 
+def delete_user(session, actor, user_id):
+    from sqlalchemy import delete
+    from nova.models import Audit, Credential, LoginSession
+
+    require(session, actor, 'users')
+    if user_id == actor:
+        raise BusinessError('You cannot delete your own account.')
+    obj = lock(session, User, user_id)
+    links = (
+        (Voucher, Voucher.created_by),
+        (Voucher, Voucher.approved_by),
+        (BookingEvent, BookingEvent.created_by),
+        (BookingEvent, BookingEvent.approved_by),
+        (Audit, Audit.actor_id),
+    )
+    for model, column in links:
+        if session.scalar(select(model.id).where(column == user_id).limit(1)):
+            raise BusinessError('This user has transaction or audit history and cannot be deleted. Deactivate the account instead.')
+
+    audit(session, actor, 'delete_user', obj,
+          {'email': obj.email, 'name': obj.name, 'role': obj.role, 'active': obj.active})
+    session.execute(delete(LoginSession).where(LoginSession.user_id == user_id))
+    session.execute(delete(Credential).where(Credential.user_id == user_id))
+    session.delete(obj)
+
+
 def close_period(session, actor, through):
     require(session, actor, 'users')
     from nova.services.common import business_today
