@@ -127,23 +127,47 @@ def installments(session, project_id=None, end=None, paisa=False):
 
 
 def invoice_balances(session, project_id=None, end=None, paisa=False, voucher_status='Posted'):
-    """Approved, active invoices by default. voucher_status='Pending' lists invoices awaiting approval (nothing settled)."""
-    from nova.models import InvoicePayment
+    """Invoice balances at the report date, including approved corrections effective by that date."""
+    import json
+    from nova.models import InvoiceCorrection, InvoicePayment
     asof = end or business_today()
     paid = {}
     for identity, amount in session.execute(select(InvoicePayment.invoice_id, InvoicePayment.amount)
                                             .where(InvoicePayment.voucher_id.in_(effective_vouchers(session, through=asof)))).all():
         paid[identity] = paid.get(identity, 0) + amount
     query = (select(Invoice, Party, Voucher).join(Party, Invoice.party_id == Party.id).join(Voucher, Invoice.voucher_id == Voucher.id)
-             .where(Invoice.date <= asof, Invoice.status == 'Active', Voucher.status == voucher_status))
+             .where(Invoice.date <= asof, Voucher.status == voucher_status))
+    if voucher_status == 'Posted':
+        later_cancellations = select(Voucher.reversal_of).where(Voucher.status == 'Posted',
+                                                               Voucher.reversal_of.is_not(None), Voucher.date > asof)
+        query = query.where((Invoice.status == 'Active') | Invoice.voucher_id.in_(later_cancellations),
+                            Voucher.id.in_(effective_vouchers(session, through=asof)))
+    else:
+        query = query.where(Invoice.status == 'Active')
     if project_id:
         query = query.where(Invoice.project_id == project_id)
+    invoices = session.execute(query.order_by(Invoice.date)).all()
+    invoice_ids = [obj.id for obj, _, _ in invoices]
+    before_corrections = {}
+    if invoice_ids:
+        future_corrections = session.scalars(select(InvoiceCorrection)
+                                             .where(InvoiceCorrection.invoice_id.in_(invoice_ids),
+                                                    InvoiceCorrection.status == 'Approved', InvoiceCorrection.effective_on > asof)
+                                             .order_by(InvoiceCorrection.effective_on, InvoiceCorrection.reviewed_at,
+                                                       InvoiceCorrection.created_at, InvoiceCorrection.id)).all()
+        for correction in future_corrections:
+            if correction.invoice_id not in before_corrections:
+                before_corrections[correction.invoice_id] = json.loads(correction.before_data)
     rows = []
-    for obj, party, voucher in session.execute(query.order_by(Invoice.date)).all():
+    for obj, party, voucher in invoices:
+        values = before_corrections.get(obj.id)
+        reference = values['reference'] if values else obj.reference
+        due = values['due'] if values else obj.due.isoformat()
+        amount = values['amount'] if values else obj.amount
         settled = paid.get(obj.id, 0)
-        rows.append({'Invoice ID': obj.id, 'Reference': obj.reference, 'Type': obj.kind, 'Party': party.name,
-                     'Date': obj.date.isoformat(), 'Due Date': obj.due.isoformat(), 'Amount': obj.amount,
-                     'Paid': settled, 'Outstanding': obj.amount - settled, 'Voucher Status': voucher.status})
+        rows.append({'Invoice ID': obj.id, 'Reference': reference, 'Type': obj.kind, 'Party': party.name,
+                     'Date': obj.date.isoformat(), 'Due Date': due, 'Amount': amount,
+                     'Paid': settled, 'Outstanding': amount - settled, 'Voucher Status': voucher.status})
     return _present(pd.DataFrame(rows, columns=['Invoice ID', 'Reference', 'Type', 'Party', 'Date', 'Due Date', 'Amount', 'Paid',
                                                 'Outstanding', 'Voucher Status']), paisa)
 
