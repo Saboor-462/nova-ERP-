@@ -51,12 +51,68 @@ def brand_header(title, subtitle=''):
 
 def login_brand():
     st.markdown(
-        '<style>'
-        '[data-testid="stSidebar"],'
-        '[data-testid="stSidebarCollapsedControl"]{display:none!important}'
-        '.block-container{max-width:640px!important;'
-        'padding-top:2.5rem!important;padding-bottom:2rem!important}'
-        '</style>',
+        '''<style>
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarCollapsedControl"] {
+            display: none !important;
+        }
+
+        html,
+        body,
+        [data-testid="stApp"],
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMain"],
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"] {
+            background: #13283d !important;
+            color: #ffffff !important;
+        }
+
+        .block-container {
+            max-width: 640px !important;
+            padding-top: 2.5rem !important;
+            padding-bottom: 2rem !important;
+        }
+
+        .nova-login-hero {
+            background: transparent !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stForm"] {
+            background: transparent !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stForm"] label,
+        [data-testid="stForm"] label p {
+            color: #ffffff !important;
+        }
+
+        [data-testid="stForm"] [data-baseweb="input"],
+        [data-testid="stForm"] input {
+            background: #1b354e !important;
+            color: #ffffff !important;
+            caret-color: #ffffff;
+        }
+
+        [data-testid="stForm"] input {
+            -webkit-text-fill-color: #ffffff;
+        }
+
+        [data-testid="stForm"] [data-baseweb="input"] button {
+            background: transparent !important;
+            color: #ffffff !important;
+        }
+
+        [data-testid="stToolbar"] button {
+            color: #ffffff !important;
+        }
+        </style>''',
         unsafe_allow_html=True,
     )
 
