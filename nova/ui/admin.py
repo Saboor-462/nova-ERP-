@@ -34,6 +34,20 @@ def administration(factory, actor):
                         set_password(s, actor.id, user.id, password)
                     return user
                 mutate(factory, save)
+    with st.expander('Delete user'):
+        st.caption('Only users without transaction or audit history can be deleted. Deactivate users whose history must be retained.')
+        user_options = {u.id: f'{u.name} · {u.email} · {u.role}' for u in users if u.id != actor.id}
+        if user_options:
+            selected_user = choose('User to delete', user_options, key='delete_user_id')
+            with st.form(f'delete_user:{selected_user}'):
+                confirmed = st.checkbox('Permanently delete this user and remove their password and sign-in sessions.')
+                if st.form_submit_button('Delete user'):
+                    if not confirmed:
+                        st.warning('Select the confirmation checkbox before deleting this user.')
+                    elif mutate(factory, lambda s: master.delete_user(s, actor.id, selected_user)):
+                        st.rerun()
+        else:
+            st.info('No other user accounts are available to delete.')
     with st.expander('Invoice / voucher business header'):
         with factory() as session:
             current = {k: session.get(Setting, k).value if session.get(Setting, k) else '' for k in ('business_name', 'business_address', 'business_contact', 'business_footer')}
