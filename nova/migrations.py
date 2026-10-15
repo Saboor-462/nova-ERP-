@@ -7,7 +7,7 @@ from sqlalchemy.schema import AddConstraint, CreateTable
 from nova.diagnostics import log_failure
 from nova.models import VOUCHER_BALANCE_DDL, Base, Invoice, Setting, Voucher
 
-SCHEMA_VERSION = '4'
+SCHEMA_VERSION = '5'
 
 
 class MigrationError(RuntimeError):
@@ -111,7 +111,12 @@ def _to_4(connection):
         Base.metadata.tables[name].create(connection, checkfirst=True)
 
 
-STEPS = {'1': _to_2, '2': _to_3, '3': _to_4}
+def _to_5(connection):
+    # Store correction requests separately; existing invoices and vouchers remain unchanged.
+    Base.metadata.tables['invoice_corrections'].create(connection, checkfirst=True)
+
+
+STEPS = {'1': _to_2, '2': _to_3, '3': _to_4, '4': _to_5}
 
 
 def stored_version(connection):
