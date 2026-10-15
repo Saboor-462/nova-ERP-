@@ -302,3 +302,17 @@ def report_page(factory, actor):
                     frame = frame[frame[column].astype(str) == selected]
     # Totals above were computed in paisa; convert once for display and export.
     table(reports.to_rupees(frame), name, key='report_' + name.replace(' ', '_'), hide=['Invoice ID', 'Voucher ID'])
+    if name.startswith('Trial Balance'):
+        closing_rows = frame.loc[frame['Group'] == False] if 'Group' in frame else frame
+        closing_debit = int(closing_rows['Closing Debit'].sum())
+        closing_credit = int(closing_rows['Closing Credit'].sum())
+        difference = closing_debit - closing_credit
+        st.subheader('Closing balance totals')
+        debit_col, credit_col, difference_col = st.columns(3)
+        debit_col.metric('Total closing debit', f'PKR {rupees(closing_debit):,.2f}')
+        credit_col.metric('Total closing credit', f'PKR {rupees(closing_credit):,.2f}')
+        difference_col.metric('Difference (Debit - Credit)', f'PKR {rupees(difference):,.2f}')
+        if difference == 0:
+            st.success('Balanced: closing debit and credit totals are equal.')
+        else:
+            st.error('Unbalanced: closing debit and credit totals differ.')
