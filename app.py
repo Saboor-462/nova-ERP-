@@ -3,7 +3,7 @@ from functools import lru_cache
 import streamlit as st
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from nova.auth import identify
+from nova.auth import identify, render_account_controls
 from nova.config import ConfigError, settings
 from nova.db import initialize, session_factory
 from nova.diagnostics import log_failure
@@ -50,13 +50,36 @@ except (ValueError, SQLAlchemyError) as exc:
     st.error('Database setup is incomplete. Check DATABASE_URL and run python -m scripts.init_db. See docs/SETUP.md.')
     st.stop()
 
-actor = identify(factory, config)
-st.sidebar.image(str(LOGO), width=125)
-st.sidebar.title('NOVA ERP')
+actor = identify(factory, config, render_sidebar=False)
+
+st.markdown(
+    '''<style>
+    [data-testid="stSidebar"] .st-key-nova_sidebar_layout {
+        min-height: calc(100dvh - 6rem);
+        display: flex;
+        flex-direction: column;
+    }
+
+    [data-testid="stSidebar"] .st-key-nova_sidebar_footer {
+        margin-top: auto;
+        padding-top: 1rem;
+    }
+    </style>''',
+    unsafe_allow_html=True,
+)
+
 groups = ['Dashboard', 'Reports', 'Vouchers', 'Chart of Accounts', 'Clients', 'Projects', 'Units', 'Allotments',
           'Invoices', 'Transfers & Cancellations', 'CRM / Leads', 'Cash / Bank', 'Bulk Entries', 'Financial Years', 'Administration']
-page = st.sidebar.radio('Navigation', groups)
-st.sidebar.caption('Version 0.2.0 · Local accounts & branded reports')
+
+with st.sidebar:
+    with st.container(key='nova_sidebar_layout'):
+        st.image(str(LOGO), width=125)
+        page = st.radio('Navigation', groups)
+
+        with st.container(key='nova_sidebar_footer'):
+            st.caption('Version 0.2.0 · Local accounts & branded reports')
+            render_account_controls(factory, config, actor)
+
 if config['mode'] == 'demo':
     st.caption('Local database · Email/password login · PKR · Pakistan time')
 
@@ -77,6 +100,7 @@ routes = {
     'Financial Years': lambda: admin.financial_years(factory, actor),
     'Administration': lambda: admin.administration(factory, actor),
 }
+
 try:
     routes[page]()
 except SQLAlchemyError as exc:
