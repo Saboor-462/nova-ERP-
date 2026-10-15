@@ -184,6 +184,11 @@ def pay_invoice(session, actor, invoice_id, cash_account_id, on, amount, token):
         raise BusinessError('Resolve the pending invoice cancellation before settlement.')
     if obj.status != 'Active' or existing(session, Voucher, obj.voucher_id).status != 'Posted' or on < obj.date:
         raise BusinessError('Approve the invoice first; settlement cannot predate the invoice.')
+    from nova.services.invoice_corrections import ensure_no_pending_correction, latest_correction_date
+    ensure_no_pending_correction(session, obj.id)
+    corrected_on = latest_correction_date(session, obj.id)
+    if corrected_on and on < corrected_on:
+        raise BusinessError('Settlement cannot predate the latest approved invoice correction.')
     cash = existing(session, Account, cash_account_id)
     if not cash.is_cash:
         raise BusinessError('Select a cash/bank account.')
