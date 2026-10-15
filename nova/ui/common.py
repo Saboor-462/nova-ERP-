@@ -147,8 +147,8 @@ def table(frame, name, key=None, hide=None):
         st.session_state.pop(f'pdf:{key}', None)
     st.session_state[f'pdf_signature:{key}'] = signature
     cols = st.columns(4)
-    cols[0].download_button('CSV', safe_csv(shown), f'{key}.csv', 'text/csv', key=f'csv:{key}')
-    cols[1].download_button('Excel', excel_bytes(shown), f'{key}.xlsx', key=f'xlsx:{key}')
+    cols[0].download_button('Download CSV', safe_csv(shown), f'{key}.csv', 'text/csv', key=f'csv:{key}')
+    cols[1].download_button('Download Excel', excel_bytes(shown), f'{key}.xlsx', key=f'xlsx:{key}')
     # Large exports use CSV/Excel; PDF generation is an explicit user action.
     if len(shown) <= 2000 and cols[2].button('Prepare PDF / Print', key=f'makepdf:{key}'):
         st.session_state[f'pdf:{key}'] = pdf_bytes(shown, name)
