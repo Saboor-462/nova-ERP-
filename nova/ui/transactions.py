@@ -1,8 +1,9 @@
 from datetime import date, timedelta
+import json
 import pandas as pd
 import streamlit as st
 from sqlalchemy import select
-from nova.models import Account, Attachment, Booking, BookingEvent, Installment, Invoice, Line, Party, Project, Unit, Voucher
+from nova.models import Account, Attachment, Audit, Booking, BookingEvent, Installment, Invoice, Line, Party, Project, Unit, Voucher
 from nova.services import accounting, sales
 from nova.services.common import BusinessError, business_today, money, rupees
 from nova.ui.common import can, choose, md_escape, mutate, options, pdf_bytes, table, token, uploaded
@@ -43,10 +44,33 @@ def show_voucher(factory, actor, voucher_id, demo):
         rows = session.execute(select(Line, Account, Party).join(Account, Line.account_id == Account.id)
                                .outerjoin(Party, Line.party_id == Party.id).where(Line.voucher_id == voucher_id)).all()
         attachments = session.scalars(select(Attachment).where(Attachment.voucher_id == voucher_id)).all()
+        rejection_reason = ''
+        reason_label = 'Rejection reason'
+        if v.status == 'Rejected':
+            decision = session.scalar(
+                select(Audit).where(
+                    Audit.entity == Voucher.__tablename__,
+                    Audit.entity_id == voucher_id,
+                    Audit.action.in_(['reject', 'cancel_pending']),
+                ).order_by(Audit.at.desc(), Audit.id.desc()).limit(1)
+            )
+            if decision:
+                reason_label = 'Cancellation reason' if decision.action == 'cancel_pending' else 'Rejection reason'
+                try:
+                    detail = json.loads(decision.detail)
+                except (TypeError, json.JSONDecodeError):
+                    detail = {}
+                if isinstance(detail, dict):
+                    rejection_reason = str(detail.get('reason') or '').strip()
     frame = pd.DataFrame([{'Account': f'{a.code} · {a.name}', 'Party': p.name if p else '', 'Description': l.description,
                            'Debit': rupees(l.debit), 'Credit': rupees(l.credit)} for l, a, p in rows])
     st.subheader(v.number)
     st.caption(f'{v.date} · {v.kind} · {v.status} · {md_escape(v.description)}')
+    if v.status == 'Rejected':
+        if rejection_reason:
+            st.warning(f'{reason_label}: {md_escape(rejection_reason)}')
+        else:
+            st.info('No rejection or cancellation reason was found for this voucher.')
     st.dataframe(frame, hide_index=True, width='stretch')
     st.write(f'Total debit: PKR {rupees(sum(l.debit for l, _, _ in rows)):,.2f} · Total credit: PKR {rupees(sum(l.credit for l, _, _ in rows)):,.2f}')
     from nova.documents import voucher_pdf
@@ -67,7 +91,8 @@ def show_voucher(factory, actor, voucher_id, demo):
             with st.form(f'reject:{v.id}'):
                 reason = st.text_input('Rejection reason')
                 if st.form_submit_button('Reject voucher'):
-                    mutate(factory, lambda s: accounting.reject(s, actor.id, v.id, reason))
+                    if mutate(factory, lambda s: accounting.reject(s, actor.id, v.id, reason)):
+                        st.rerun()
     if v.status == 'Pending' and can(actor, 'entry'):
         pending_editor(factory, actor, v, rows)
     if v.status == 'Posted' and can(actor, 'entry') and not v.reversal_of:
