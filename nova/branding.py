@@ -132,7 +132,7 @@ def theme():
     st.markdown(
         '''<style>
         .block-container {
-            padding-top: 1.5rem;
+            padding-top: 4.5rem;
             padding-bottom: 2rem;
             max-width: 1500px;
         }
@@ -142,12 +142,85 @@ def theme():
             border-right: 2px solid #cba334;
         }
 
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+            padding-top: .5rem !important;
+        }
+
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
         [data-testid="stSidebar"] label,
         [data-testid="stSidebar"] h1,
         [data-testid="stSidebar"] h2,
         [data-testid="stSidebar"] h3 {
             color: #edf3f8;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+        [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
+        [data-testid="stSidebar"] .st-key-nova_sidebar_footer [data-testid="stMarkdownContainer"],
+        [data-testid="stSidebar"] .st-key-nova_sidebar_footer [data-testid="stMarkdownContainer"] p {
+            color: #edf3f8 !important;
+            opacity: 1 !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"],
+        [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] {
+            width: 100% !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] {
+            gap: .45rem;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            width: 100%;
+            min-height: 44px;
+            margin: 0 !important;
+            padding: 10px 14px;
+            background: #13283d;
+            border: 1px solid #cba334;
+            border-radius: 9px;
+            color: #edf3f8 !important;
+            cursor: pointer;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-of-type {
+            display: none;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:last-of-type {
+            min-width: 0;
+            margin: 0;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] p {
+            margin: 0;
+            color: #edf3f8 !important;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {
+            background: #203a52;
+            border-color: #e4c36f;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {
+            background: #25435c;
+            border-color: #e4c36f;
+            box-shadow: inset 3px 0 0 #e4c36f;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p {
+            color: #ffffff !important;
+            font-weight: 700;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:focus-visible) {
+            outline: 2px solid #e4c36f;
+            outline-offset: 3px;
         }
 
         [data-testid="stSidebar"] [data-baseweb="select"] * {
@@ -180,8 +253,8 @@ def theme():
 
         .nova-sidebar-brand {
             text-align: center;
-            padding: 12px 0 20px;
-            margin-bottom: 12px;
+            padding: 0 0 12px;
+            margin-bottom: 8px;
             border-bottom: 1px solid #cba33455;
         }
 
