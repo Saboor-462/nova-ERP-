@@ -182,20 +182,34 @@ def edit_booking(session, actor, booking_id, on, total, down, count, first_due):
 
 
 def void_invoice(session, actor, invoice_id, on, reason, token):
+    from nova.models import InvoiceCorrection
+    from nova.services.invoice_corrections import ensure_no_pending_correction, latest_invoice_activity
     from nova.services.sales import invoice_paid
     require(session, actor, 'entry')
     obj = lock(session, Invoice, invoice_id)
     original = lock(session, Voucher, obj.voucher_id)
+    ensure_no_pending_correction(session, obj.id)
     if original.status != 'Posted' or obj.status != 'Active' or invoice_paid(session, obj.id, True):
         raise BusinessError('Only an approved unsettled invoice can be cancelled. Reverse its settlements first if applicable.')
     check_date(session, on)
-    if on < original.date or not reason.strip():
-        raise BusinessError('Provide a reason and a date on or after the invoice.')
+    if on < max(original.date, latest_invoice_activity(session, obj)) or not reason.strip():
+        raise BusinessError('Provide a reason and a cancellation date on or after the invoice and its latest correction or settlement activity.')
     if session.scalar(select(Voucher.id).where(Voucher.reversal_of == original.id, Voucher.status != 'Rejected')):
         raise BusinessError('A cancellation/reversal already exists.')
-    rows = session.scalars(select(Line).where(Line.voucher_id == original.id)).all()
+    correction_vouchers = select(InvoiceCorrection.voucher_id).where(InvoiceCorrection.invoice_id == obj.id,
+                                                                    InvoiceCorrection.status == 'Approved',
+                                                                    InvoiceCorrection.voucher_id.is_not(None))
+    rows = session.scalars(select(Line).join(Voucher, Line.voucher_id == Voucher.id)
+                           .where(Voucher.status == 'Posted',
+                                  (Line.voucher_id == original.id) | Line.voucher_id.in_(correction_vouchers))).all()
+    balances = {}
+    for row in rows:
+        key = (row.account_id, row.party_id)
+        balances[key] = balances.get(key, 0) + row.debit - row.credit
+    reversed_rows = [accounting.line(account_id, max(-balance, 0), max(balance, 0), party_id, reason)
+                     for (account_id, party_id), balance in balances.items() if balance]
     v = accounting.create_voucher(session, actor, obj.project_id, on, 'Reversal', reason,
-          [accounting.line(l.account_id, l.credit, l.debit, l.party_id, l.description) for l in rows], token)
+                                  reversed_rows, token)
     v.reversal_of = original.id
     audit(session, actor, 'invoice_cancellation_requested', obj, {'voucher': v.number, 'reason': reason})
     return v
@@ -242,6 +256,10 @@ def save_year(session, actor, name, starts, ends, record_id=None, status='Not au
             raise BusinessError('Audited status requires a completed year, auditor name, and valid audit date.')
         if session.scalar(select(Voucher.id).where(Voucher.date.between(starts, ends), Voucher.status == 'Pending')) or session.scalar(select(BookingEvent.id).where(BookingEvent.date.between(starts, ends), BookingEvent.status == 'Pending')):
             raise BusinessError('Resolve pending entries/requests in this year before recording it as audited.')
+        from nova.models import InvoiceCorrection
+        if session.scalar(select(InvoiceCorrection.id).where(InvoiceCorrection.effective_on.between(starts, ends),
+                                                            InvoiceCorrection.status == 'Pending')):
+            raise BusinessError('Resolve pending invoice corrections in this year before recording it as audited.')
     obj = lock(session, FinancialYear, record_id) if record_id else FinancialYear(name=name, starts=starts, ends=ends)
     if record_id and (starts != obj.starts or ends != obj.ends) and session.scalar(select(Voucher.id).where(Voucher.date.between(obj.starts, obj.ends))):
         raise BusinessError('The date range of a year containing transactions cannot change.')
@@ -286,6 +304,11 @@ def edit_pending_payment(session, actor, voucher_id, on, amount, description):
         if not payment:
             raise BusinessError('Settlement has no linked invoice.')
         invoice = lock(session, Invoice, payment.invoice_id)
+        from nova.services.invoice_corrections import ensure_no_pending_correction, latest_correction_date
+        ensure_no_pending_correction(session, invoice.id)
+        corrected_on = latest_correction_date(session, invoice.id)
+        if corrected_on and on < corrected_on:
+            raise BusinessError('Settlement cannot predate the latest approved invoice correction.')
         if amount > invoice.amount - invoice_paid(session, invoice.id, True) + payment.amount or on < invoice.date:
             raise BusinessError('Settlement amount or date is outside the invoice balance/date range.')
         payment.amount = amount
