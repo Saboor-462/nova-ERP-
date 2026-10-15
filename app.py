@@ -54,8 +54,9 @@ actor = identify(factory, config, render_sidebar=False)
 
 st.markdown(
     '''<style>
-    [data-testid="stSidebar"] .st-key-nova_sidebar_layout {
-        min-height: calc(100dvh - 6rem);
+    [data-testid="stSidebar"] .st-key-nova_sidebar_layout,
+    [data-testid="stSidebar"] .st-key-nova_sidebar_layout > [data-testid="stVerticalBlock"] {
+        min-height: calc(100dvh - 4rem);
         display: flex;
         flex-direction: column;
     }
@@ -74,10 +75,9 @@ groups = ['Dashboard', 'Reports', 'Vouchers', 'Chart of Accounts', 'Clients', 'P
 with st.sidebar:
     with st.container(key='nova_sidebar_layout'):
         st.image(str(LOGO), width=125)
-        page = st.radio('Navigation', groups)
+        page = st.radio('Navigation', groups, key='nova_navigation', width='stretch')
 
         with st.container(key='nova_sidebar_footer'):
-            st.caption('Version 0.2.0 · Local accounts & branded reports')
             render_account_controls(factory, config, actor)
 
 if config['mode'] == 'demo':
