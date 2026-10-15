@@ -36,11 +36,68 @@ def filters(factory, prefix):
 
 
 def dashboard(factory, actor):
+    import html
     from nova.branding import brand_header
     from nova.services.overview import diagnostics, hierarchy, project_summary
     brand_header('Business overview', 'Property inventory, collections, and approved financial balances')
     project, start, end = filters(factory, 'dashboard')
     view = st.radio('Dashboard view', ['Project dashboard', 'Balance sheet dashboard', 'Consolidated financial dashboard'], horizontal=True)
+    show_amounts = st.toggle('Show amounts', value=True, key='dashboard_show_amounts')
+
+    st.markdown(
+        '''<style>
+        .nova-dashboard-card {
+            background: linear-gradient(135deg, #13283d, #1d3c56);
+            border: 1px solid #cba33455;
+            border-top: 3px solid #cba334;
+            border-radius: 14px;
+            padding: 20px;
+            min-height: 154px;
+            margin-bottom: 16px;
+            box-sizing: border-box;
+        }
+
+        .nova-dashboard-card-label {
+            color: #dce6ef;
+            font-size: .88rem;
+            line-height: 1.5;
+            margin-bottom: 14px;
+            overflow-wrap: anywhere;
+        }
+
+        .nova-dashboard-card-unit {
+            color: #e4c36f;
+            font-size: .72rem;
+            font-weight: 600;
+            letter-spacing: .08em;
+            min-height: 18px;
+        }
+
+        .nova-dashboard-card-value {
+            color: #ffffff;
+            font-size: clamp(1.15rem, 2vw, 1.85rem);
+            font-weight: 700;
+            line-height: 1.4;
+            font-variant-numeric: tabular-nums;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+        </style>''',
+        unsafe_allow_html=True,
+    )
+
+    def amount_card(container, label, value, count=False):
+        unit = '' if count or not show_amounts else 'PKR'
+        displayed = f'{value:,}' if count else f'{rupees(value):,.2f}' if show_amounts else 'Hidden'
+        container.markdown(
+            '<div class="nova-dashboard-card">'
+            f'<div class="nova-dashboard-card-label">{html.escape(label)}</div>'
+            f'<div class="nova-dashboard-card-unit">{unit}</div>'
+            f'<div class="nova-dashboard-card-value">{html.escape(displayed)}</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
     with factory() as session:
         summary = project_summary(session, None if view.startswith('Consolidated') else project, start, end)
         alerts = diagnostics(session, None if view.startswith('Consolidated') else project, end)
@@ -53,14 +110,15 @@ def dashboard(factory, actor):
     if pending:
         st.error(f'{pending} voucher(s) awaiting approval. Pending entries are excluded from posted balances.')
     for _, alert in alerts.iterrows():
-        st.error(f'{alert["Alert"]}: PKR {rupees(int(alert["Difference (paisa)"])):,.2f}. {alert["Action"]}')
+        difference = f'PKR {rupees(int(alert["Difference (paisa)"])):,.2f}' if show_amounts else 'Amount hidden'
+        st.error(f'{alert["Alert"]}: {difference}. {alert["Action"]}')
     if not summary.empty:
         keys = ['Cash & Bank', 'Receivables', 'Payables', 'Booked Sales', 'Booking Collections', 'Revenue', 'Expenses', 'Approved Bookings']
         for offset in (0, 4):
             cols = st.columns(4)
             for col, key in zip(cols, keys[offset:offset+4]):
                 value = int(summary[key].sum())
-                col.metric(key, str(value) if key == 'Approved Bookings' else f'PKR {rupees(value):,.2f}')
+                amount_card(col, key, value, count=key == 'Approved Bookings')
         if view == 'Project dashboard':
             st.subheader('Inventory and booking status')
             st.bar_chart(summary.set_index('Project')[['Available', 'Reserved / Booked']])
@@ -70,12 +128,15 @@ def dashboard(factory, actor):
             equity = int(bs.loc[bs['Type'] == 'Equity', 'Amount'].sum())
             cols = st.columns(3)
             for col, label, value in zip(cols, ['Total assets', 'Total liabilities', 'Total equity'], [assets, liabilities, equity]):
-                col.metric(label, f'PKR {rupees(value):,.2f}')
-            table(reports.to_rupees(tree[['Account Code', 'Account', 'Type', 'Level', 'Group', 'Amount']]), 'Account Hierarchy', 'dashboard_hierarchy')
+                amount_card(col, label, value)
+            hierarchy_shown = reports.to_rupees(tree[['Account Code', 'Account', 'Type', 'Level', 'Group', 'Amount']])
+            if not show_amounts:
+                hierarchy_shown['Amount'] = 'Hidden'
+            table(hierarchy_shown, 'Account Hierarchy', 'dashboard_hierarchy')
         monetary = ['Booked Sales', 'Booking Collections', 'Receivables', 'Payables', 'Cash & Bank', 'Revenue', 'Expenses', 'Cash Inflow', 'Cash Outflow']
         shown = summary.copy()
         for col in monetary:
-            shown[col] = shown[col].map(rupees)
+            shown[col] = shown[col].map(rupees) if show_amounts else 'Hidden'
         table(shown, 'Project Financial Summary', 'dashboard_project_summary')
     else:
         st.info('Create your first project under Projects. No fictional business data is added automatically.')
